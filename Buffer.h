@@ -4,7 +4,7 @@
 #include "BasicConfig.h"
 #include "ReplacementPolicy.h"
 class BufferManager;
-using byte = unsigned char;
+using byte = char;
 
 template <typename _RepPolicy>
 class __Block
@@ -14,7 +14,7 @@ class __Block
 #endif
 #define MOD "BLOCK"
     friend class BufferManager;
-    using AccessType = _RepPolicy::AccessType;
+    using AccessType = typename _RepPolicy::AccessType;
 
 public:
     static const size_t block_size = BLOCK_SIZE;
@@ -46,6 +46,11 @@ public:
         return !this->_isPinned && (r._isPinned || this->_policy < r._policy);
     }
 
+    friend std::ostream &operator<<(std::ostream &os, const __Block &c) {
+        std::cout << "remove " << c._filePath << " " << c._offset / BLOCK_SIZE << std::endl;
+        return os;
+    }
+
 private:
     // 基本属性
     byte *_rawData;
@@ -57,17 +62,23 @@ private:
     // 但文件必须存在
     __Block(const std::string &filePath, size_t offset) : _isPinned(false)
     {
-        std::ifstream is(filePath);
-        if (!is)
-            LOG(MOD, "Open file failed");
         this->_offset = offset;
         this->_filePath = filePath;
+        _rawData = new byte[block_size]{0};
+
+        std::ifstream is(filePath, std::ios::in | std::ios::binary);
+        if (!is)
+        {
+            //create empty file
+            std::ofstream os(this->_filePath);
+            os.close();
+            is.open(filePath, std::ios::in | std::ios::binary);
+        }
 
         size_t begin = is.tellg();
-        is.seekg(0, ios::end);
+        is.seekg(0, std::ios::end);
         size_t fileLen = is.tellg() - begin;
 
-        _rawData = new byte[block_size]{0};
         if (fileLen > offset)
         {
             is.seekg(offset);
@@ -81,10 +92,10 @@ private:
     {
         if (!_policy._isDirty)
             return;
-        std::ofstream os(filePath, ios::app);
+        std::ofstream os(this->_filePath, std::ios::in | std::ios::binary);
         if (!os)
             LOG(MOD, "Unknown Failure");
-        os.seekg(_offset);
+        os.seekp(_offset);
         os.write(_rawData, block_size);
         os.close();
         _policy._isDirty = false;
@@ -114,6 +125,9 @@ private:
     {
         if (index < 0 || index >= size)
             return;
+#ifdef _DEBUG_
+        LOG(MOD, *buffer[index]);
+#endif
         // remove block
         delete buffer[index];
         buffer[index] = buffer[size - 1];
@@ -124,7 +138,7 @@ private:
     void enqueue(Block *block_ptr)
     {
         // 缓冲区满, 分配失败
-        if (size < N_BLOCKS)
+        if (size >= N_BLOCKS)
             throw std::bad_alloc();
         buffer[size++] = block_ptr;
     }
@@ -152,7 +166,10 @@ private:
     }
 
 public:
-    BufferManager() {}
+    BufferManager()
+    {
+        size = 0;
+    }
     ~BufferManager()
     {
         for (int i = 0; i < size; i++)
